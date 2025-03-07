@@ -1,278 +1,237 @@
-import subprocess
-import logging
-import re
-import os
-import socket
-import winreg
-
-def check_bitlocker(check):
-    """Check BitLocker encryption status using manage-bde"""
+def check_edge_settings(check):
+    """Check Microsoft Edge security settings"""
     try:
-        # Get BitLocker status for the specified drive
-        drive = check.get('drive', 'C:')
-        cmd = ['manage-bde', '-status', drive]
+        # Most Edge settings are in registry
+        import registry_checks
+        
+        setting_name = check.get('setting', '')
+        
+        # Map setting names to registry paths
+        edge_settings = {
+            'block_third_party_cookies': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\Edge',
+                'key': 'BlockThirdPartyCookies',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            },
+            'enable_site_isolation': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\Edge',
+                'key': 'SitePerProcess',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            },
+            'tracking_prevention': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\Edge',
+                'key': 'TrackingPrevention',
+                'value_type': 'REG_DWORD',
+                'expected_value': 2  # 0=off, 1=basic, 2=balanced, 3=strict
+            },
+            'disable_password_manager': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\Edge',
+                'key': 'PasswordManagerEnabled',
+                'value_type': 'REG_DWORD',
+                'expected_value': 0
+            },
+            'prevent_smart_screen_override': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\Edge',
+                'key': 'PreventSmartScreenPromptOverride',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            }
+        }
+        
+        if setting_name in edge_settings:
+            registry_check = edge_settings[setting_name]
+            return registry_checks.check_registry_value(registry_check)
+        else:
+            return {'actual_value': f"Unknown Edge setting: {setting_name}", 'result': 'Error'}
+    except Exception as e:
+        logging.error(f"Error checking Edge settings: {e}")
+        return {'actual_value': str(e), 'result': 'Error'}
+
+def check_defender_atp(check):
+    """Check Windows Defender Advanced Threat Protection settings"""
+    try:
+        # Most Defender ATP settings are in registry
+        import registry_checks
+        
+        setting_name = check.get('setting', '')
+        
+        # Map setting names to registry paths
+        atp_settings = {
+            'enable_atp': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\Windows Advanced Threat Protection',
+                'key': 'Configuration',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            },
+            'sample_sharing': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\Windows Advanced Threat Protection',
+                'key': 'AllowSampleCollection',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            },
+            'tamper_protection': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Microsoft\\Windows Defender\\Features',
+                'key': 'TamperProtection',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            },
+            'pua_protection': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\Windows Defender',
+                'key': 'PUAProtection',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            }
+        }
+        
+        if setting_name in atp_settings:
+            registry_check = atp_settings[setting_name]
+            return registry_checks.check_registry_value(registry_check)
+        else:
+            # Try to check using PowerShell for some settings like tamper protection
+            if setting_name == 'tamper_protection':
+                cmd = ['powershell', '-Command', 'Get-MpComputerStatus | Select-Object IsTamperProtected']
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if "True" in result.stdout:
+                    return {'actual_value': 'Tamper Protection is enabled', 'result': 'Pass'}
+                else:
+                    return {'actual_value': 'Tamper Protection is not enabled', 'result': 'Fail'}
+            return {'actual_value': f"Unknown Defender ATP setting: {setting_name}", 'result': 'Error'}
+    except Exception as e:
+        logging.error(f"Error checking Defender ATP settings: {e}")
+        return {'actual_value': str(e), 'result': 'Error'}
+
+def check_tpm(check):
+    """Check TPM (Trusted Platform Module) status"""
+    try:
+        # Check TPM status using PowerShell
+        cmd = ['powershell', '-Command', 'Get-Tpm | Select-Object -Property TpmPresent,TpmReady,TpmEnabled']
         result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            return {'actual_value': f"Error running Get-Tpm: {result.stderr}", 'result': 'Error'}
         
         # Parse the output
-        encryption_status = None
-        protection_status = None
+        tpm_present = "TpmPresent : True" in result.stdout
+        tpm_ready = "TpmReady : True" in result.stdout
+        tpm_enabled = "TpmEnabled : True" in result.stdout
         
-        for line in result.stdout.splitlines():
-            if "Encryption Method" in line:
-                encryption_status = line.split(':')[1].strip()
-            if "Protection Status" in line:
-                protection_status = line.split(':')[1].strip()
-        
-        if encryption_status and protection_status:
-            status = f"Encryption: {encryption_status}, Protection: {protection_status}"
-            # Check if the drive is encrypted and protection is on
-            is_compliant = "AES" in encryption_status and "Protection On" in protection_status
-            result = 'Pass' if is_compliant else 'Fail'
-            return {'actual_value': status, 'result': result}
+        if tpm_present and tpm_ready and tpm_enabled:
+            status = "TPM is present, ready, and enabled"
+            result = 'Pass'
+        elif tpm_present:
+            status = f"TPM is present but not fully configured (Ready: {tpm_ready}, Enabled: {tpm_enabled})"
+            result = 'Fail'
         else:
-            return {'actual_value': 'Unable to determine BitLocker status', 'result': 'Fail'}
+            status = "TPM is not present"
+            result = 'Fail'
+            
+        return {'actual_value': status, 'result': result}
     except Exception as e:
-        logging.error(f"Error checking BitLocker: {e}")
+        logging.error(f"Error checking TPM: {e}")
         return {'actual_value': str(e), 'result': 'Error'}
 
-def check_firewall_rule(check):
-    """Check Windows Firewall rules using netsh"""
+def check_microsoft_store(check):
+    """Check Microsoft Store app settings"""
     try:
-        # Get firewall rule details
-        rule_name = check['rule_name']
-        cmd = ['netsh', 'advfirewall', 'firewall', 'show', 'rule', f'name="{rule_name}"']
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        import registry_checks
         
-        if "No rules match the specified criteria" in result.stdout:
-            return {'actual_value': f"Rule '{rule_name}' not found", 'result': 'Fail'}
+        policy_name = check.get('policy', '')
         
-        # Check if rule is enabled
-        enabled = re.search(r"Enabled:\s*(Yes|No)", result.stdout)
-        direction = re.search(r"Direction:\s*(In|Out)", result.stdout)
-        action = re.search(r"Action:\s*(Allow|Block)", result.stdout)
+        store_policies = {
+            'disable_store': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\WindowsStore',
+                'key': 'RemoveWindowsStore',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            },
+            'disable_store_apps': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\WindowsStore',
+                'key': 'DisableStoreApplications',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            },
+            'require_private_store': {
+                'hive': 'HKLM',
+                'path': 'SOFTWARE\\Policies\\Microsoft\\WindowsStore',
+                'key': 'RequirePrivateStoreOnly',
+                'value_type': 'REG_DWORD',
+                'expected_value': 1
+            }
+        }
         
-        if enabled and direction and action:
-            is_enabled = enabled.group(1) == "Yes"
-            rule_direction = direction.group(1)
-            rule_action = action.group(1)
-            
-            status = f"Enabled: {is_enabled}, Direction: {rule_direction}, Action: {rule_action}"
-            
-            # Check compliance based on expected values
-            is_compliant = (
-                (not check.get('enabled') or is_enabled == check['enabled']) and
-                (not check.get('direction') or rule_direction == check['direction']) and
-                (not check.get('action') or rule_action == check['action'])
-            )
-            
-            result = 'Pass' if is_compliant else 'Fail'
-            return {'actual_value': status, 'result': result}
+        if policy_name in store_policies:
+            registry_check = store_policies[policy_name]
+            return registry_checks.check_registry_value(registry_check)
         else:
-            return {'actual_value': 'Unable to determine rule status', 'result': 'Fail'}
+            return {'actual_value': f"Unknown Microsoft Store policy: {policy_name}", 'result': 'Error'}
     except Exception as e:
-        logging.error(f"Error checking firewall rule: {e}")
+        logging.error(f"Error checking Microsoft Store policies: {e}")
         return {'actual_value': str(e), 'result': 'Error'}
 
-def check_windows_feature(check):
-    """Check if a Windows feature is enabled/disabled using DISM"""
+def check_laps(check):
+    """Check Local Administrator Password Solution (LAPS) settings"""
     try:
-        feature_name = check['feature_name']
-        cmd = ['dism', '/online', '/get-featureinfo', f'/featurename:{feature_name}']
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        import registry_checks
         
-        # Check if feature exists and its state
-        if "Error" in result.stdout and "not found" in result.stdout:
-            return {'actual_value': f"Feature '{feature_name}' not found", 'result': 'Fail'}
+        # Check if LAPS is installed
+        laps_check = {
+            'hive': 'HKLM',
+            'path': 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+            'subtype': 'values_in_key',
+            'value_pattern': '.*LAPS.*',
+            'expected_content': 'Local Administrator Password Solution',
+            'content_comparison_op': 'contains',
+            'should_match': True
+        }
         
-        state = re.search(r"State\s*:\s*(\w+)", result.stdout)
-        if state:
-            feature_state = state.group(1)
-            expected_state = check.get('expected_state', 'Disabled')
-            is_compliant = feature_state == expected_state
-            result = 'Pass' if is_compliant else 'Fail'
-            return {'actual_value': f"State: {feature_state}", 'result': result}
-        else:
-            return {'actual_value': 'Unable to determine feature state', 'result': 'Fail'}
-    except Exception as e:
-        logging.error(f"Error checking Windows feature: {e}")
-        return {'actual_value': str(e), 'result': 'Error'}
-
-def check_installed_software(check):
-    """Check if specific software is installed/not installed"""
-    try:
-        software_name = check.get('software_name', '')
-        should_be_installed = check.get('should_be_installed', False)
+        # For values_in_key, we need to do a custom check since this isn't a direct registry check
+        registry_values = registry_checks.check_registry_values_in_key(laps_check)
         
-        # Check both 32-bit and 64-bit software
-        registry_paths = [
-            (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
-            (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
-        ]
-        
-        found = False
-        installed_version = None
-        
-        for hive, path in registry_paths:
-            try:
-                with winreg.OpenKey(hive, path) as key:
-                    # Enumerate all subkeys (installed software)
-                    subkey_count = winreg.QueryInfoKey(key)[0]
-                    
-                    for i in range(subkey_count):
-                        try:
-                            subkey_name = winreg.EnumKey(key, i)
-                            with winreg.OpenKey(key, subkey_name) as subkey:
-                                try:
-                                    display_name = winreg.QueryValueEx(subkey, 'DisplayName')[0]
-                                    if software_name.lower() in display_name.lower():
-                                        found = True
-                                        try:
-                                            installed_version = winreg.QueryValueEx(subkey, 'DisplayVersion')[0]
-                                        except:
-                                            installed_version = "Unknown"
-                                        break
-                                except (WindowsError, FileNotFoundError):
-                                    continue
-                        except (WindowsError, FileNotFoundError):
-                            continue
-            except (WindowsError, FileNotFoundError):
-                continue
-        
-        is_compliant = found == should_be_installed
-        result = 'Pass' if is_compliant else 'Fail'
-        
-        if found:
-            actual_value = f"Installed, version: {installed_version}"
-        else:
-            actual_value = "Not installed"
+        if registry_values['result'] == 'Pass':
+            # Check specific LAPS settings if installed
+            setting_name = check.get('setting', '')
             
-        return {'actual_value': actual_value, 'result': result}
-    except Exception as e:
-        logging.error(f"Error checking installed software: {e}")
-        return {'actual_value': str(e), 'result': 'Error'}
-
-def check_network_settings(check):
-    """Check network configuration settings"""
-    try:
-        setting_type = check.get('setting_type', '')
-        
-        if setting_type == 'tcp_port':
-            port = check.get('port')
-            should_be_open = check.get('should_be_open', False)
-            
-            # Check if port is open
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(1)
-            result = s.connect_ex(('localhost', port))
-            s.close()
-            
-            is_open = (result == 0)
-            is_compliant = is_open == should_be_open
-            
-            actual_value = f"Port {port} is {'open' if is_open else 'closed'}"
-            result = 'Pass' if is_compliant else 'Fail'
-            
-            return {'actual_value': actual_value, 'result': result}
-            
-        elif setting_type == 'ip_config':
-            setting_name = check.get('setting_name', '')
-            expected_value = check.get('expected_value', '')
-            
-            # Use ipconfig /all to get network settings
-            cmd = ['ipconfig', '/all']
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            # Check for the setting in the output
-            # This is simplified and may need more robust pattern matching
-            pattern = rf"{setting_name}.*?:\s*(.+)"
-            match = re.search(pattern, result.stdout, re.IGNORECASE)
-            
-            if match:
-                actual_value = match.group(1).strip()
-                is_compliant = (actual_value == expected_value)
-                result = 'Pass' if is_compliant else 'Fail'
-                return {'actual_value': actual_value, 'result': result}
+            if setting_name == 'password_age':
+                # Check password age policy
+                age_check = {
+                    'hive': 'HKLM',
+                    'path': 'SOFTWARE\\Policies\\Microsoft Services\\AdmPwd',
+                    'key': 'PasswordAgeDays',
+                    'value_type': 'REG_DWORD',
+                    'expected_value': check.get('expected_value', 30),
+                    'comparison_op': 'less_than_or_equal'
+                }
+                return registry_checks.check_registry_value(age_check)
+            elif setting_name == 'complexity':
+                # Check password complexity policy
+                complexity_check = {
+                    'hive': 'HKLM',
+                    'path': 'SOFTWARE\\Policies\\Microsoft Services\\AdmPwd',
+                    'key': 'PasswordComplexity',
+                    'value_type': 'REG_DWORD',
+                    'expected_value': check.get('expected_value', 4)
+                }
+                return registry_checks.check_registry_value(complexity_check)
             else:
-                return {'actual_value': f"Setting '{setting_name}' not found", 'result': 'Fail'}
-        
+                return {'actual_value': f"LAPS is installed, but unknown setting: {setting_name}", 'result': 'Error'}
         else:
-            return {'actual_value': f"Unknown network setting type: {setting_type}", 'result': 'Error'}
-            
+            return {'actual_value': "LAPS is not installed", 'result': 'Fail'}
     except Exception as e:
-        logging.error(f"Error checking network settings: {e}")
-        return {'actual_value': str(e), 'result': 'Error'}
-
-def check_file_permissions(check):
-    """Check file existence, content or permissions"""
-    try:
-        file_path = check.get('path', '')
-        check_type = check.get('file_check_type', 'exists')
-        
-        if not os.path.exists(file_path):
-            should_exist = check.get('should_exist', True)
-            result = 'Fail' if should_exist else 'Pass'
-            return {'actual_value': f"File does not exist", 'result': result}
-            
-        if check_type == 'exists':
-            return {'actual_value': "File exists", 'result': 'Pass'}
-            
-        elif check_type == 'content':
-            expected_content = check.get('expected_content', '')
-            content_comparison = check.get('content_comparison', 'contains')
-            
-            with open(file_path, 'r', errors='ignore') as f:
-                content = f.read()
-                
-            if content_comparison == 'contains':
-                is_compliant = expected_content in content
-            elif content_comparison == 'exact':
-                is_compliant = expected_content == content
-            elif content_comparison == 'regex':
-                is_compliant = bool(re.search(expected_content, content))
-            else:
-                return {'actual_value': f"Unknown comparison type: {content_comparison}", 'result': 'Error'}
-                
-            result = 'Pass' if is_compliant else 'Fail'
-            actual_value = f"Content {'matches' if is_compliant else 'does not match'} expected"
-            return {'actual_value': actual_value, 'result': result}
-            
-        elif check_type == 'permissions':
-            # Get file permissions with icacls
-            cmd = ['icacls', file_path]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            permissions = result.stdout.strip()
-            expected_permissions = check.get('expected_permissions', [])
-            
-            # Very simple check - see if all expected permissions are mentioned
-            is_compliant = all(perm in permissions for perm in expected_permissions)
-            
-            result = 'Pass' if is_compliant else 'Fail'
-            return {'actual_value': permissions, 'result': result}
-            
-        else:
-            return {'actual_value': f"Unknown file check type: {check_type}", 'result': 'Error'}
-            
-    except Exception as e:
-        logging.error(f"Error checking file: {e}")
-        return {'actual_value': str(e), 'result': 'Error'}
-
-def check_powershell_policy(check):
-    """Check PowerShell execution policy"""
-    try:
-        # Run PowerShell to get the execution policy
-        cmd = ['powershell', '-Command', 'Get-ExecutionPolicy']
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        policy = result.stdout.strip()
-        expected_policy = check.get('expected_policy', 'Restricted')
-        
-        is_compliant = (policy == expected_policy)
-        result = 'Pass' if is_compliant else 'Fail'
-        
-        return {'actual_value': policy, 'result': result}
-    except Exception as e:
-        logging.error(f"Error checking PowerShell policy: {e}")
+        logging.error(f"Error checking LAPS: {e}")
         return {'actual_value': str(e), 'result': 'Error'}
 
 def check_other(check):
@@ -291,5 +250,15 @@ def check_other(check):
         return check_file_permissions(check)
     elif check.get('subtype') == 'powershell_policy':
         return check_powershell_policy(check)
+    elif check.get('subtype') == 'edge_settings':
+        return check_edge_settings(check)
+    elif check.get('subtype') == 'defender_atp':
+        return check_defender_atp(check)
+    elif check.get('subtype') == 'tpm':
+        return check_tpm(check)
+    elif check.get('subtype') == 'microsoft_store':
+        return check_microsoft_store(check)
+    elif check.get('subtype') == 'laps':
+        return check_laps(check)
     else:
         return {'actual_value': f"Unknown check subtype: {check.get('subtype')}", 'result': 'Error'}
