@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Configure CIS Checks</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1, h2 { color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .btn { background-color: #007bff; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-danger { background-color: #dc3545; }
+        .check-container { border: 1px solid #ddd; padding: 15px; margin-bottom: 15px; border-radius: 4px; }
+        .check-header { display: flex; justify-content: space-between; align-items: center; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Configure CIS Benchmark Checks</h1>
+        
+        <div class="form-group">
+            <label for="configFile">Load Configuration File:</label>
+            <input type="file" id="configFile" accept=".json">
+            <button class="btn" onclick="loadConfig()">Load</button>
+        </div>
+        
+        <div class="form-group">
+            <label for="configName">Configuration Name:</label>
+            <input type="text" id="configName" value="custom_config.json">
+        </div>
+        
+        <div id="checksContainer">
+            <!-- Checks will be added here -->
+        </div>
+        
+        <button class="btn" onclick="addCheck()">Add Check</button>
+        <button class="btn" onclick="saveConfig()">Save Configuration</button>
+        <a href="/" class="btn">Back to Home</a>
+        
+        <!-- Templates for different check types -->
+        <div id="checkTemplates" class="hidden">
+            <!-- Registry Check Template -->
+            <div id="registry-template" class="check-container">
+                <div class="check-header">
+                    <h3>Registry Check</h3>
+                    <button class="btn btn-danger" onclick="removeCheck(this)">Remove</button>
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <input type="text" name="description" class="check-field">
+                </div>
+                <div class="form-group">
+                    <label>Hive:</label>
+                    <select name="hive" class="check-field">
+                        <option value="HKLM">HKLM</option>
+                        <option value="HKCU">HKCU</option>
+                        <option value="HKCR">HKCR</option>
+                        <option value="HKU">HKU</option>
+                        <option value="HKCC">HKCC</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Path:</label>
+                    <input type="text" name="path" class="check-field">
+                </div>
+                <div class="form-group">
+                    <label>Key:</label>
+                    <input type="text" name="key" class="check-field">
+                </div>
+                <div class="form-group">
+                    <label>Value Type:</label>
+                    <select name="value_type" class="check-field">
+                        <option value="REG_DWORD">REG_DWORD</option>
+                        <option value="REG_SZ">REG_SZ</option>
+                        <option value="REG_BINARY">REG_BINARY</option>
+                        <option value="REG_MULTI_SZ">REG_MULTI_SZ</option>
+                        <option value="REG_EXPAND_SZ">REG_EXPAND_SZ</option>
+                        <option value="REG_QWORD">REG_QWORD</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Expected Value:</label>
+                    <input type="text" name="expected_value" class="check-field">
+                </div>
+                <div class="form-group">
+                    <label>Missing Is Compliant:</label>
+                    <select name="missing_is_compliant" class="check-field">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </select>
+                </div>
+                <input type="hidden" name="type" value="registry">
+            </div>
+            
+            <!-- Service Check Template -->
+            <div id="service-template" class="check-container">
+                <div class="check-header">
+                    <h3>Service Check</h3>
+                    <button class="btn btn-danger" onclick="removeCheck(this)">Remove</button>
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <input type="text" name="description" class="check-field">
+                </div>
+                <div class="form-group">
+                    <label>Service Name:</label>
+                    <input type="text" name="name" class="check-field">
+                </div>
+                <div class="form-group">
+                    <label>Expected Status:</label>
+                    <select name="expected_status" class="check-field">
+                        <option value="Running">Running</option>
+                        <option value="Stopped">Stopped</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Expected Startup:</label>
+                    <select name="expected_startup" class="check-field">
+                        <option value="Automatic">Automatic</option>
+                        <option value="Manual">Manual</option>
+                        <option value="Disabled">Disabled</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Missing Is Compliant:</label>
+                    <select name="missing_is_compliant" class="check-field">
+                        <option value="false">No</option>
+                        <option value="true">Yes</option>
+                    </select>
+                </div>
+                <input type="hidden" name="type" value="service">
+            </div>
+            
+            <!-- Other templates would go here -->
+        </div>
+    </div>
+    
+    <script>
+        function addCheck() {
+            // Show a dialog to select check type
+            const checkType = prompt("Enter check type (registry, service, gpo, other):", "registry");
+            if (!checkType) return;
+            
+            // Get the template
+            const template = document.getElementById(`${checkType}-template`);
+            if (!template) {
+                alert(`Template for ${checkType} not found`);
+                return;
+            }
+            
+            // Clone the template and add it to the checks container
+            const newCheck = template.cloneNode(true);
+            newCheck.id = `check-${Date.now()}`;
+            document.getElementById('checksContainer').appendChild(newCheck);
+        }
+        
+        function removeCheck(button) {
+            const check = button.closest('.check-container');
+            check.remove();
+        }
+        
+        function saveConfig() {
+            const checksContainer = document.getElementById('checksContainer');
+            const checkElements = checksContainer.querySelectorAll('.check-container');
+            
+            const checks = [];
+            checkElements.forEach(checkElement => {
+                const check = {};
+                const fields = checkElement.querySelectorAll('.check-field');
+                
+                fields.forEach(field => {
+                    let value = field.value;
+                    
+                    // Handle booleans
+                    if (value === 'true') value = true;
+                    if (value === 'false') value = false;
+                    
+                    // Handle numbers
+                    if (!isNaN(value) && field.name !== 'name') {
+                        value = Number(value);
+                    }
+                    
+                    check[field.name] = value;
+                });
+                
+                // Add the type
+                const typeField = checkElement.querySelector('[name="type"]');
+                if (typeField) {
+                    check.type = typeField.value;
+                }
+                
+                checks.push(check);
+            });
+            
+            // Create and download the config file
+            const configName = document.getElementById('configName').value;
+            const jsonConfig = JSON.stringify(checks, null, 2);
+            
+            // Use the API to save
+            fetch('/save_config?filename=' + encodeURIComponent(configName), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: jsonConfig
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Configuration saved successfully!');
+                } else {
+                    alert('Error saving configuration: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            });
+        }
+        
+        function loadConfig() {
+            const fileInput = document.getElementById('configFile');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const config = JSON.parse(e.target.result);
+                    
+                    // Clear existing checks
+                    document.getElementById('checksContainer').innerHTML = '';
+                    
+                    // Add each check
+                    config.forEach(check => {
+                        // Get the appropriate template
+                        const template = document.getElementById(`${check.type}-template`);
+                        if (!template) {
+                            console.warn(`Template for ${check.type} not found, skipping`);
+                            return;
+                        }
+                        
+                        // Clone the template
+                        const newCheck = template.cloneNode(true);
+                        newCheck.id = `check-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                        
+                        // Fill in the fields
+                        Object.keys(check).forEach(key => {
+                            const field = newCheck.querySelector(`[name="${key}"]`);
+                            if (field) {
+                                field.value = check[key];
+                            }
+                        });
+                        
+                        // Add to the container
+                        document.getElementById('checksContainer').appendChild(newCheck);
+                    });
+                    
+                    alert('Configuration loaded successfully!');
+                } catch (error) {
+                    alert('Error parsing configuration: ' + error);
+                }
+            };
+            reader.readAsText(file);
+        }
+    </script>
+</body>
+</html>

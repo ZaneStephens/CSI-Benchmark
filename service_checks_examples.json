@@ -1,0 +1,46 @@
+[
+    {
+        "type": "service",
+        "description": "Ensure Telnet service is stopped and disabled",
+        "name": "Telnet",
+        "expected_status": "Stopped",
+        "expected_startup": "Disabled",
+        "missing_is_compliant": true
+    },
+    {
+        "type": "service",
+        "subtype": "status",
+        "description": "Ensure Windows Defender service is running and automatic",
+        "name": "WinDefend",
+        "expected_status": "Running",
+        "expected_startup": "Automatic",
+        "missing_is_compliant": false
+    },
+    {
+        "type": "service",
+        "subtype": "permissions",
+        "description": "Ensure Windows Defender service has appropriate permissions",
+        "name": "WinDefend",
+        "expected_permissions": ["NT AUTHORITY\\SYSTEM", "NT SERVICE\\TrustedInstaller"],
+        "strict": false,
+        "missing_is_compliant": false
+    },
+    {
+        "type": "service",
+        "subtype": "dependencies",
+        "description": "Ensure Windows Defender service dependencies are correct",
+        "name": "WinDefend",
+        "expected_dependencies": ["RpcSs"],
+        "expected_dependents": [],
+        "missing_is_compliant": false
+    },
+    {
+        "type": "service",
+        "subtype": "multiple",
+        "description": "Ensure multiple insecure services are disabled",
+        "names": ["Telnet", "ftpsvc", "TFTP"],
+        "expected_status": "Stopped",
+        "expected_startup": "Disabled",
+        "missing_is_compliant": true
+    }
+]
