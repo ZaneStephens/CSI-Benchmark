@@ -1,0 +1,6 @@
+pywin32==306
+typing-extensions>=4.4.0
+colorama>=0.4.6
+tqdm>=4.64.1
+tabulate>=0.9.0
+flask>=2.0.0  # Required for web UI
