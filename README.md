@@ -280,7 +280,7 @@ Contributions are welcome! Feel free to submit pull requests for:
 
 ## 📜 License
 
-[Add your license information here]
+None - Go wilf
 
 ---
 
