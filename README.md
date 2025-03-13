@@ -4,7 +4,7 @@ A powerful Python-based tool for auditing Windows systems against CIS (Center fo
 
 ## 🚀 Overview
 
-This tool automates the verification of security configurations on Windows systems according to CIS Benchmark recommendations. It provides thorough checking of 100+ security controls, including:
+This tool automates the verification of security configurations on Windows systems according to CIS Benchmark recommendations. It end goal is to provide thorough checking of 100+ security controls - across multiple versions, including:
 
 - Registry settings (password policies, security options, etc.)
 - Service configurations (startup type, status)
